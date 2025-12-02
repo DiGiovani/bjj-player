@@ -1,4 +1,2 @@
 *.mp4 filter=lfs diff=lfs merge=lfs -text
-hls/**/*.ts filter=lfs diff=lfs merge=lfs -text
-
 public/available_cameras/hls/**/*.ts filter=lfs diff=lfs merge=lfs -text
