@@ -1,64 +1,291 @@
-import Image from "next/image";
+"use client";
+
+import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+const cameraFiles = [
+  { label: "Câmera 1 · Teto", filename: "Cam1 (teto).mp4" },
+  { label: "Câmera 2", filename: "Cam2.mp4" },
+  { label: "Câmera 3", filename: "Cam3.mp4" },
+  { label: "Câmera 4", filename: "Cam4.mp4" },
+  { label: "Câmera 5", filename: "Cam5.mp4" },
+  { label: "Câmera 6", filename: "Cam6.mp4" },
+  { label: "Câmera 7", filename: "Cam7.mp4" },
+  { label: "Câmera 8", filename: "Cam8.mp4" },
+];
+
+const buildVideoSrc = (filename: string) =>
+  `/available_cameras/${encodeURIComponent(filename)}`;
+
+const buildPreviewSrc = (filename: string) => {
+  const dotIndex = filename.lastIndexOf(".");
+  const previewName =
+    dotIndex === -1
+      ? `${filename}.preview`
+      : `${filename.slice(0, dotIndex)}.preview${filename.slice(dotIndex)}`;
+  return buildVideoSrc(previewName);
+};
 
 export default function Home() {
+  const cameras = useMemo(
+    () =>
+      cameraFiles.map((camera) => ({
+        ...camera,
+        src: buildVideoSrc(camera.filename),
+        previewSrc: buildPreviewSrc(camera.filename),
+      })),
+    [],
+  );
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isMuted, setIsMuted] = useState(true);
+  const [aspectRatios, setAspectRatios] = useState(() =>
+    cameras.map(() => 16 / 9),
+  );
+  const [isCompact, setIsCompact] = useState(false);
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const pendingSeekRef = useRef<{ index: number; time: number } | null>(null);
+
+  const videoSources = useMemo(
+    () =>
+      cameras.map((camera, index) =>
+        index === activeIndex
+          ? camera.src
+          : camera.previewSrc ?? camera.src,
+      ),
+    [activeIndex, cameras],
+  );
+
+  const selectCamera = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex === activeIndex) return;
+
+      const currentVideo = videoRefs.current[activeIndex];
+      if (currentVideo) {
+        const anchorTime = currentVideo.currentTime;
+        if (Number.isFinite(anchorTime)) {
+          pendingSeekRef.current = { index: nextIndex, time: anchorTime };
+        } else {
+          pendingSeekRef.current = null;
+        }
+      } else {
+        pendingSeekRef.current = null;
+      }
+
+      setActiveIndex(nextIndex);
+    },
+    [activeIndex],
+  );
+
+  const cycleCamera = useCallback(
+    (direction: 1 | -1) => {
+      const nextIndex =
+        (activeIndex + direction + cameras.length) % cameras.length;
+      selectCamera(nextIndex);
+    },
+    [activeIndex, cameras.length, selectCamera],
+  );
+
+  useEffect(() => {
+    const video = videoRefs.current[activeIndex];
+    if (!video) return;
+
+    video.muted = isMuted;
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise.catch(() => {
+        /* ignore autoplay rejection */
+      });
+    }
+  }, [activeIndex, isMuted]);
+
+  useEffect(() => {
+    videoRefs.current.forEach((video) => {
+      if (!video) return;
+      video.muted = true;
+      video.play().catch(() => undefined);
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompact(window.innerWidth < 640);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const orbitRadius = isCompact ? 38 : 55;
+  const thumbWidth = isCompact ? "100px" : "130px";
+  const activeWidth = isCompact ? "min(95vw, 360px)" : "min(70vw, 460px)";
+
+  const containerPadding = isCompact
+    ? "px-3 py-8"
+    : "px-4 py-12";
+
+  const handleKeyPress = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowRight") {
+        cycleCamera(1);
+      } else if (event.key === "ArrowLeft") {
+        cycleCamera(-1);
+      }
+    },
+    [cycleCamera],
+  );
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div
+      className={`min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-zinc-900 ${containerPadding} text-white`}
+    >
+      <main
+        className="mx-auto flex w-full max-w-6xl flex-col gap-8 sm:gap-12"
+        onKeyDown={handleKeyPress}
+        tabIndex={0}
+        role="application"
+        aria-label="Galeria circular multicanais"
+      >
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-6 text-center shadow-2xl backdrop-blur sm:p-8 sm:text-left">
+          <p className="text-xs uppercase tracking-[0.35em] text-white/50 sm:text-sm">
+            câmeras sincronizadas
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+          <h1 className="mt-2 text-3xl font-semibold leading-tight text-white sm:text-4xl">
+            Reprodução perfeita em múltiplos ângulos
+          </h1>
+          <p className="mt-4 text-sm text-white/70 sm:max-w-xl sm:text-base">
+            Circule ao redor do tatame e troque de câmera sem perder o instante.
+            Cada mudança mantém o mesmo timestamp para analisar cada posição em
+            qualquer perspectiva imediatamente.
+          </p>
+        </section>
+        <section>
+          <div className="relative mx-auto aspect-square w-full max-w-full sm:max-w-[540px] lg:max-w-[680px]">
+            {cameras.map((camera, index) => {
+              const angle = (index / cameras.length) * 360;
+              const radians = ((angle - 90) * Math.PI) / 180;
+              const x = 50 + Math.cos(radians) * orbitRadius;
+              const y = 50 + Math.sin(radians) * orbitRadius;
+              const ratio = aspectRatios[index] || 16 / 9;
+              const isActive = index === activeIndex;
+
+              const baseStyles = isActive
+                ? {
+                  top: "50%",
+                  left: "50%",
+                  width: activeWidth,
+                  aspectRatio: ratio,
+                  transform: "translate(-50%, -50%)",
+                  zIndex: 20,
+                }
+                : {
+                  top: `${y}%`,
+                  left: `${x}%`,
+                  width: thumbWidth,
+                  aspectRatio: ratio,
+                  transform: "translate(-50%, -50%)",
+                  zIndex: 5,
+                };
+
+              const videoSrc = videoSources[index];
+
+              return (
+                <button
+                  key={camera.filename}
+                  type="button"
+                  onClick={() => selectCamera(index)}
+                  className={`group absolute overflow-hidden rounded-3xl border border-white/15 bg-black/40 shadow-[0_15px_35px_rgba(0,0,0,0.35)] transition duration-300 ${isActive ? "hover:border-emerald-200" : "hover:border-white/40"
+                    }`}
+                  style={baseStyles}
+                  aria-pressed={isActive}
+                  aria-label={`Selecionar ${camera.label}`}
+                >
+                  <video
+                    ref={(node) => {
+                      videoRefs.current[index] = node;
+                    }}
+                    className={`h-full w-full object-cover ${isActive
+                      ? "opacity-100"
+                      : "opacity-80 group-hover:opacity-100"
+                      }`}
+                    src={videoSrc}
+                    playsInline
+                    loop
+                    muted={isMuted || !isActive}
+                    preload="auto"
+                    controls={false}
+                    onLoadedMetadata={(event) => {
+                      const video = event.currentTarget;
+                      if (!video.videoWidth || !video.videoHeight) {
+                        return;
+                      }
+                      const newRatio = video.videoWidth / video.videoHeight;
+                      setAspectRatios((prev) => {
+                        if (prev[index] === newRatio) {
+                          return prev;
+                        }
+                        const next = [...prev];
+                        next[index] = newRatio;
+                        return next;
+                      });
+
+                      const pendingSeek = pendingSeekRef.current;
+                      if (pendingSeek && pendingSeek.index === index) {
+                        const duration = video.duration || pendingSeek.time;
+                        const safeTime = duration
+                          ? Math.min(pendingSeek.time, Math.max(duration - 0.15, 0))
+                          : pendingSeek.time;
+                        try {
+                          video.currentTime = safeTime;
+                        } catch (seekError) {
+                          console.warn("Unable to sync camera", seekError);
+                        } finally {
+                          pendingSeekRef.current = null;
+                        }
+                      }
+                    }}
+                  />
+                  <span
+                    className={`pointer-events-none absolute inset-x-4 bottom-4 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${isActive
+                      ? "bg-black/70 text-emerald-200"
+                      : "bg-black/50 text-white/80"
+                      }`}
+                  >
+                    {camera.label}
+                  </span>
+                </button>
+              );
+            })}
+            <div className="pointer-events-none absolute inset-0 rounded-full border border-dashed border-white/15" />
+          </div>
+        </section>
+
+        <section className="mt-4 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-6 text-center shadow-2xl backdrop-blur sm:text-left lg:flex-row lg:items-center lg:justify-between">
+          <p className="text-sm uppercase tracking-[0.3em] text-white/60">
+            controles das câmeras
+          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap">
+            <button
+              className="w-full rounded-full border border-white/30 px-5 py-2 text-sm font-medium uppercase tracking-wide text-white transition hover:border-white sm:w-auto"
+              onClick={() => cycleCamera(-1)}
+            >
+              Anterior • {cameras[(activeIndex - 1 + cameras.length) % cameras.length].label}
+            </button>
+            <button
+              className="w-full rounded-full border border-white/30 px-5 py-2 text-sm font-medium uppercase tracking-wide text-white transition hover:border-white sm:w-auto"
+              onClick={() => cycleCamera(1)}
+            >
+              Próxima • {cameras[(activeIndex + 1) % cameras.length].label}
+            </button>
+            <button
+              className="w-full rounded-full border border-emerald-400/60 bg-emerald-500/20 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-emerald-200 transition hover:border-emerald-300 hover:bg-emerald-500/30 sm:w-auto"
+              onClick={() => setIsMuted((prev) => !prev)}
+            >
+              {isMuted ? "Ativar áudio" : "Silenciar áudio"}
+            </button>
+          </div>
+        </section>
       </main>
     </div>
   );
