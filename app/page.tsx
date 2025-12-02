@@ -2,6 +2,7 @@
 
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type Hls from "hls.js";
 
 const cameraFiles = [
   { label: "Câmera 1 · Teto", filename: "Cam1 (teto).mp4" },
@@ -13,6 +14,8 @@ const cameraFiles = [
   { label: "Câmera 7", filename: "Cam7.mp4" },
   { label: "Câmera 8", filename: "Cam8.mp4" },
 ];
+
+const PREVIEW_VARIANT = "480p";
 
 const buildVideoSrc = (filename: string) =>
   `/available_cameras/${encodeURIComponent(filename)}`;
@@ -26,6 +29,25 @@ const buildPreviewSrc = (filename: string) => {
   return buildVideoSrc(previewName);
 };
 
+const slugFromFilename = (filename: string) => {
+  const dotIndex = filename.lastIndexOf(".");
+  const stem = dotIndex === -1 ? filename : filename.slice(0, dotIndex);
+  return stem
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_.-]/g, "");
+};
+
+const buildHlsMasterSrc = (filename: string) => {
+  const slug = slugFromFilename(filename);
+  return `/available_cameras/hls/${slug}/master.m3u8`;
+};
+
+const buildHlsVariantSrc = (filename: string, variant: string) => {
+  const slug = slugFromFilename(filename);
+  return `/available_cameras/hls/${slug}/${slug}_${variant}.m3u8`;
+};
+
 export default function Home() {
   const cameras = useMemo(
     () =>
@@ -33,6 +55,8 @@ export default function Home() {
         ...camera,
         src: buildVideoSrc(camera.filename),
         previewSrc: buildPreviewSrc(camera.filename),
+        hlsMasterSrc: buildHlsMasterSrc(camera.filename),
+        hlsPreviewSrc: buildHlsVariantSrc(camera.filename, PREVIEW_VARIANT),
       })),
     [],
   );
@@ -45,15 +69,105 @@ export default function Home() {
   const [isCompact, setIsCompact] = useState(false);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const pendingSeekRef = useRef<{ index: number; time: number } | null>(null);
+  const hlsConstructorRef = useRef<null | typeof import("hls.js").default>(null);
+  const hlsInstances = useRef<(Hls | null)[]>([]);
 
   const videoSources = useMemo(
     () =>
-      cameras.map((camera, index) =>
-        index === activeIndex
-          ? camera.src
-          : camera.previewSrc ?? camera.src,
-      ),
+      cameras.map((camera, index) => {
+        if (index === activeIndex) {
+          return camera.hlsMasterSrc ?? camera.src;
+        }
+        return camera.hlsPreviewSrc ?? camera.previewSrc ?? camera.src;
+      }),
     [activeIndex, cameras],
+  );
+
+  const destroyInstance = useCallback((index: number) => {
+    const existing = hlsInstances.current[index];
+    if (existing) {
+      existing.destroy();
+      hlsInstances.current[index] = null;
+    }
+  }, []);
+
+  const attachStream = useCallback(
+    (index: number, src: string) => {
+      const video = videoRefs.current[index];
+      if (!video || !src) return;
+      if (video.dataset.hlsSrc === src) return;
+      video.dataset.hlsSrc = src;
+      destroyInstance(index);
+
+      const requestAutoplay = () => {
+        const playPromise = video.play();
+        if (playPromise) {
+          playPromise.catch(() => undefined);
+        }
+      };
+
+      const ensureAutoplay = () => {
+        if (video.readyState >= 1) {
+          requestAutoplay();
+        } else {
+          video.addEventListener("loadedmetadata", requestAutoplay, { once: true });
+        }
+      };
+
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = src;
+        video.load();
+        ensureAutoplay();
+        return;
+      }
+
+      let active = true;
+      const expectedSrc = src;
+
+      const setupHls = async () => {
+        if (!hlsConstructorRef.current) {
+          const mod = await import("hls.js");
+          hlsConstructorRef.current = mod.default;
+        }
+        if (!active || video.dataset.hlsSrc !== expectedSrc) {
+          return;
+        }
+        const HlsConstructor = hlsConstructorRef.current;
+        if (!HlsConstructor || !HlsConstructor.isSupported()) {
+          video.src = src;
+          video.load();
+          ensureAutoplay();
+          return;
+        }
+
+        const hls = new HlsConstructor({
+          enableWorker: true,
+          lowLatencyMode: false,
+        });
+        hlsInstances.current[index] = hls;
+        hls.attachMedia(video);
+
+        hls.on(HlsConstructor.Events.MEDIA_ATTACHED, () => {
+          hls.loadSource(src);
+        });
+
+        hls.on(HlsConstructor.Events.MANIFEST_PARSED, ensureAutoplay);
+
+        hls.on(HlsConstructor.Events.ERROR, (_event, data) => {
+          if (data?.fatal) {
+            hls.destroy();
+            hlsInstances.current[index] = null;
+          }
+        });
+      };
+
+      setupHls();
+
+      return () => {
+        active = false;
+      };
+    },
+    [destroyInstance],
   );
 
   const selectCamera = useCallback(
@@ -91,21 +205,34 @@ export default function Home() {
     if (!video) return;
 
     video.muted = isMuted;
-    const playPromise = video.play();
-    if (playPromise) {
-      playPromise.catch(() => {
-        /* ignore autoplay rejection */
-      });
+    const attemptPlayback = () => {
+      const playPromise = video.play();
+      if (playPromise) {
+        playPromise.catch(() => {
+          /* ignore autoplay rejection */
+        });
+      }
+    };
+
+    if (video.readyState >= 1) {
+      attemptPlayback();
+    } else {
+      video.addEventListener("loadedmetadata", attemptPlayback, { once: true });
     }
   }, [activeIndex, isMuted]);
+  useEffect(() => {
+    videoSources.forEach((src, index) => {
+      attachStream(index, src);
+    });
+  }, [videoSources, attachStream]);
 
   useEffect(() => {
-    videoRefs.current.forEach((video) => {
-      if (!video) return;
-      video.muted = true;
-      video.play().catch(() => undefined);
-    });
+    const instances = hlsInstances.current;
+    return () => {
+      instances.forEach((instance) => instance?.destroy());
+    };
   }, []);
+
 
   useEffect(() => {
     const handleResize = () => {
@@ -188,8 +315,6 @@ export default function Home() {
                   zIndex: 5,
                 };
 
-              const videoSrc = videoSources[index];
-
               return (
                 <button
                   key={camera.filename}
@@ -209,7 +334,6 @@ export default function Home() {
                       ? "opacity-100"
                       : "opacity-80 group-hover:opacity-100"
                       }`}
-                    src={videoSrc}
                     playsInline
                     loop
                     muted={isMuted || !isActive}
