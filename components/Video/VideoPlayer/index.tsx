@@ -8,7 +8,7 @@ interface VideoPlayerProps {
 
 export const VideoPlayer = ({ cameras, activeIndex, videoRefs }: VideoPlayerProps) => {
   return (
-    <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
+    <div className="relative w-full h-full bg-black">
       {cameras.map((camera, index) => (
         <video
           key={camera.name}

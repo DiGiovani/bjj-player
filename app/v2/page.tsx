@@ -74,14 +74,14 @@ export default function Home() {
   }, [cameras, attachStream, volume]);
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-gray-950 via-gray-900 to-gray-950 p-6">
-      <div className="max-w-[2000px] mx-auto">
+    <div className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-zinc-900 px-4 py-8 text-white lg:px-8 lg:py-12">
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8">
         <Header />
 
-        <div className="flex flex-col lg:flex-row gap-6">
+        <div className="grid gap-8 lg:grid-cols-[1fr,auto]">
           {/* Main Video Player */}
-          <div className="flex-1" ref={videoContainerRef}>
-            <div className="aspect-video bg-black rounded-lg overflow-hidden">
+          <section className="flex flex-col gap-4">
+            <div ref={videoContainerRef}>
               <Video
                 cameras={cameras}
                 activeIndex={activeIndex}
@@ -97,7 +97,7 @@ export default function Home() {
                 onMouseLeave={handleMouseLeave}
               />
             </div>
-          </div>
+          </section>
 
           {/* Camera Selector */}
           <CameraSelector
@@ -106,7 +106,7 @@ export default function Home() {
             onSelectCamera={selectCamera}
           />
         </div>
-      </div>
+      </main>
     </div>
   );
 }

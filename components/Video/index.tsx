@@ -35,7 +35,7 @@ export const Video = ({
 
   return (
     <div
-      className="relative w-full h-full"
+      className="relative w-full h-full rounded-3xl border border-white/20 bg-black shadow-2xl overflow-hidden"
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
